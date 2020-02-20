@@ -39,17 +39,7 @@ export class AjusteeHttpClient
         });
     }
 
-    sendRequest (method: HttpMethod, lambdaPath: string, idToken: string)
-    {
-        return new Promise<httpResponse> ((resolve)=>
-        {
-            if (!this.session) throw new Error('Session is not connected.');
-            const stream = this.session.request({':method': method, ':path': `/${this.stagePrefix}/${lambdaPath}`, Authorization: idToken});
-            AjusteeHttpClient.readResponse(stream, resolve);
-        });
-    }
-
-    sendRequestNoAuth (lambdaPath: string, headers?: OutgoingHttpHeaders)
+    sendRequest (lambdaPath: string, headers?: OutgoingHttpHeaders)
     {
         return new Promise<httpResponse> ((resolve)=>
         {
@@ -65,7 +55,7 @@ export class AjusteeHttpClient
         });
     }
 
-    sendPayloadRequest (method: HttpMethod, lambdaPath: string, appId: string, isJson: boolean, data: string) //  was modified
+    sendPayloadRequest (method: HttpMethod, lambdaPath: string, appId: string, isJson: boolean, data: string)
     {
         return new Promise<httpResponse> ((resolve)=>
         {

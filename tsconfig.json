@@ -3,7 +3,8 @@
     {
         "target": "es2018",
         "lib": [ "es2018" ],
-        "module": "commonjs", 
+		"module": "commonjs", 
+		"esModuleInterop": true,
         "removeComments": true,
         "outDir": "./lib",
         "sourceMap": false,
