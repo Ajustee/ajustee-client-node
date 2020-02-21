@@ -466,27 +466,25 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 		// console.log('Connection is closed.', event);
 		this.setStatus(AjusteeClientStatus.Disconnected);
 
-		if (event.code === 1001)
+		if (this.subscribedKeys.size > 0)
 		{
-			if (this.subscribedKeys.size > 0)
+			for (const keyInfo of this.subscribedKeys.values())
 			{
-				for (const keyInfo of this.subscribedKeys.values())
+				const oldKey = keyInfo.oldKey;
+				if (oldKey) 
 				{
-					const oldKey = keyInfo.oldKey;
-					if (oldKey) 
-					{
-						keyInfo.oldKey = undefined;
-						this.setKeyStatus(oldKey, AjusteeKeyStatus.Unsubscribed);
-					}
-					else if (keyInfo.status === AjusteeKeyStatus.Unsubscribing) 
-					{
-						this.setKeyStatus(keyInfo, AjusteeKeyStatus.Unsubscribed);
-						this.subscribedKeys.delete(keyInfo.path);
-					}
+					keyInfo.oldKey = undefined;
+					this.setKeyStatus(oldKey, AjusteeKeyStatus.Unsubscribed);
 				}
-				setTimeout(this.connect.bind(this), 0);
+				else if (keyInfo.status === AjusteeKeyStatus.Unsubscribing) 
+				{
+					this.setKeyStatus(keyInfo, AjusteeKeyStatus.Unsubscribed);
+					this.subscribedKeys.delete(keyInfo.path);
+				}
 			}
+			setTimeout(this.connect.bind(this), 0);
 		}
+		
 		this.webSocket!.onopen = undefined!;
 		this.webSocket!.onmessage = undefined!;
 		this.webSocket!.onerror = undefined!;
