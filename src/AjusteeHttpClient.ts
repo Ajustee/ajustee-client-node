@@ -1,4 +1,5 @@
 import {connect, ClientHttp2Session, ClientHttp2Stream, OutgoingHttpHeaders} from 'http2';
+import type { IncomingHttpHeaders } from 'http';
 
 export const enum HttpMethod
 {
@@ -8,9 +9,10 @@ export const enum HttpMethod
     DELETE = 'DELETE'
 }
 
-interface httpResponse
+export interface HttpResponse
 {
     status: number;
+    headers: IncomingHttpHeaders;
     content?: string;
 }
 
@@ -22,7 +24,7 @@ export class AjusteeHttpClient
         private readonly stagePrefix: string,
     ) {}
 
-    connect () 
+    connect ()
     {
         return new Promise<void>((resolve)=>
         {
@@ -41,10 +43,10 @@ export class AjusteeHttpClient
 
     sendRequest (lambdaPath: string, headers?: OutgoingHttpHeaders)
     {
-        return new Promise<httpResponse> ((resolve)=>
+        return new Promise<HttpResponse> ((resolve)=>
         {
             if (!this.session) throw new Error('Session is not connected.');
-            if (headers) 
+            if (headers)
             {
                 headers[':method'] = 'GET';
                 headers[':path'] = `/${this.stagePrefix}/${lambdaPath}`;
@@ -57,29 +59,35 @@ export class AjusteeHttpClient
 
     sendPayloadRequest (method: HttpMethod, lambdaPath: string, appId: string, isJson: boolean, data: string)
     {
-        return new Promise<httpResponse> ((resolve)=>
+        return new Promise<HttpResponse> ((resolve)=>
         {
             if (!this.session) throw new Error('Session is not connected.');
-            const stream = this.session.request({':method': method, ':path': `/${this.stagePrefix}/${lambdaPath}`, 'X-API-KEY': appId, 'content-type': isJson ? 'application/json' : 'text/plain'});
+            const stream = this.session.request(
+            {
+                ':method': method,
+                ':path': `/${this.stagePrefix}/${lambdaPath}`,
+                'X-API-KEY': appId,
+                'content-type': isJson ? 'application/json' : 'text/plain'
+            });
             stream.write(data);
             stream.end();
             AjusteeHttpClient.readResponse(stream, resolve);
         });
     }
 
-    private static readResponse (stream: ClientHttp2Stream, resolve: (value: httpResponse) => void)
+    private static readResponse (stream: ClientHttp2Stream, resolve: (value: HttpResponse) => void)
     {
-        stream.on('response', (headers) => 
+        stream.on('response', (headers) =>
         {
             const status = headers[":status"]!;
-            const response: httpResponse = {status};
+            const response: HttpResponse = {status, headers};
             if (status === 204) resolve(response);
             else
             {
                 const chunks = [] as string[];
                 stream.setEncoding('utf8');
                 stream.on("data", (chunk: string) => chunks.push(chunk));
-                stream.on("end", () => 
+                stream.on("end", () =>
                 {
                     response.content = chunks.join('');
                     resolve(response);

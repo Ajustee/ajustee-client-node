@@ -1,14 +1,23 @@
 import { OutgoingHttpHeaders } from "http2";
 import WebSocket, { CloseEvent, MessageEvent, OpenEvent } from 'ws';
 import { URL } from "url";
-import { AjusteeHttpClient, HttpMethod } from "./AjusteeHttpClient";
+import { AjusteeHttpClient, HttpMethod, HttpResponse } from "./AjusteeHttpClient";
 
 const defaultUrl = 'https://api.ajustee.com/fo';
 const defaultWsUrl = 'wss://9b3vnticrc.execute-api.us-west-2.amazonaws.com/ws';
 
 const appIdHeader = 'x-api-key';
 
-export interface AjusteeOverrideParams extends Record<string, string|undefined> 
+export class AjusteeClientError extends Error
+{
+    constructor(public readonly response: HttpResponse)
+    {
+        super(`Invalid response status: ${response.status}.`);
+        this.name = 'AjusteeClientError';
+    }
+}
+
+export interface AjusteeOverrideParams extends Record<string, string|undefined>
 {
 	"ajustee-tracker-id"?: string;
 }
@@ -56,7 +65,7 @@ export const enum AjusteeKeyListenerCode
 
 export interface AjusteeKeyListenerBase
 {
-	readonly path: string 
+	readonly path: string
 	dataType?: DataType;
 	value?: string|boolean|undefined;
 	additionalParams?: AjusteeOverrideParams;
@@ -69,7 +78,7 @@ export interface AjusteeKeyListenerBase
 
 export interface AjusteeKeyListener<T extends AjusteeKeyListenerBase> extends AjusteeKeyListenerBase
 {
-	readonly path: string 
+	readonly path: string
 	dataType?: DataType;
 	value?: string|boolean|undefined;
 	additionalParams?: AjusteeOverrideParams;
@@ -170,51 +179,51 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 		if (appId) this.appId = appId;
     }
 
-    async connect () 
+    connect ()
     {
-        await this.ajusteeHttpClient.connect();
+        return this.ajusteeHttpClient.connect();
     }
 
     close ()
     {
-        this.ajusteeHttpClient.close();
+        return this.ajusteeHttpClient.close();
     }
 
     async getConfigKeys (path?: string, additionalParams?: OutgoingHttpHeaders)
     {
-        if (!this.appId) throw new Error('App id is not defined.');
+        if (!this.appId) throw new Error('App Id is not defined.');
         const requestHeaders = {[appIdHeader]: this.appId};
         if (this.defaultParams) Object.assign(requestHeaders, this.defaultParams);
         if (additionalParams) Object.assign(requestHeaders, additionalParams);
         const response = await this.ajusteeHttpClient.sendRequest (path ? `configurationKeys?path=${path}` : 'configurationKeys', requestHeaders);
-        if (response.status !== 200) throw new Error (`Invalid status code: ${response.status}. Content: ${response.content || 'undefined'}`);
+        if (response.status !== 200) throw new AjusteeClientError(response);
         return JSON.parse(response.content!) as ConfigurationKey[];
     }
 
     private async getConfigKeys2 (path?: string, additionalParams?: OutgoingHttpHeaders )
     {
-        if (!this.appId) throw new Error('App id is not defined.');
+        if (!this.appId) throw new Error('App Id is not defined.');
         const requestHeaders = {[appIdHeader]: this.appId};
         if (this.defaultParams) Object.assign(requestHeaders, this.defaultParams);
         if (additionalParams) Object.assign(requestHeaders, additionalParams);
         const response = await this.ajusteeHttpClient.sendRequest (path ? `config/${path}` : 'config', requestHeaders);
-        if (response.status !== 200) throw new Error (`Invalid status code: ${response.status}. Content: ${response.content || 'undefined'}`);
+        if (response.status !== 200) throw new AjusteeClientError(response);
         return JSON.parse(response.content!) as ConfigurationKey[];
 	}
-	
+
 	async updateConfigKey (path: string, value: string|boolean|number)
 	{
-		if (!this.appId) throw new Error('App id is not defined.');
+		if (!this.appId) throw new Error('App Id is not defined.');
 		const response = await this.ajusteeHttpClient.sendPayloadRequest(HttpMethod.PUT, `configurationKeys/${path}`,  this.appId, true, JSON.stringify({value: value.toString()}));
 		const statusCode = response.status;
-		if(statusCode !== 204) throw new Error(`Invalid response code: ${statusCode}`);
+		if(statusCode !== 204) throw new AjusteeClientError(response);
 	}
 
 		// ws client methods
 
 	setConfigKeyListener(keyInfo: T)
 	{
-		if (!this.appId) throw new Error('App id is not defined.');
+		if (!this.appId) throw new Error('App Id is not defined.');
 
 		const currKeyInfo = this.subscribedKeys.get(keyInfo.path);
 		if (keyInfo === currKeyInfo) return;
@@ -223,18 +232,18 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 		{
 			case AjusteeClientStatus.Disconnected:
 			case AjusteeClientStatus.Connecting:
-				
+
 				if (currKeyInfo) this.setKeyStatus(currKeyInfo, AjusteeKeyStatus.Unsubscribed);
 				else this.setKeyStatus(keyInfo, AjusteeKeyStatus.Subscribing);
 
 				this.subscribedKeys.set(keyInfo.path, keyInfo);
 				this.wsConnect();
 				return;
-				
+
 			case AjusteeClientStatus.Connected:
 				if (currKeyInfo)
 				{
-					const oldKeyInfo = currKeyInfo.oldKey;			
+					const oldKeyInfo = currKeyInfo.oldKey;
 					if (oldKeyInfo)
 					{
 						if (keyInfo === oldKeyInfo)
@@ -275,13 +284,13 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 
 	getConfigKeyListener (keyPath: string)
 	{
-		if (!this.appId) throw new Error('App id is not defined.');
+		if (!this.appId) throw new Error('App Id is not defined.');
 		return this.subscribedKeys.get(keyPath);
 	}
 
 	removeConfigKeyListener(keyPath: string)
 	{
-		if (!this.appId) throw new Error('App id is not defined.');
+		if (!this.appId) throw new Error('App Id is not defined.');
 		const keyInfo = this.subscribedKeys.get(keyPath);
 		if (!keyInfo)
 		{
@@ -291,7 +300,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 		if (keyInfo.oldKey)
 		{
 			// oldKey is only present when keyInfo.status == Unsubscribed
-			// thus we remove keyInfo from the map subscribedKeys 
+			// thus we remove keyInfo from the map subscribedKeys
 			// and leave oldKey in the map alone for unsubscription to complete
 			this.subscribedKeys.set(keyPath, keyInfo.oldKey);
 			keyInfo.oldKey = undefined;
@@ -306,13 +315,13 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 				this.setKeyStatus(keyInfo, AjusteeKeyStatus.Unsubscribing);
 				return;
 
-			case AjusteeKeyStatus.Subscribed: 
+			case AjusteeKeyStatus.Subscribed:
 
-				if (this.status === AjusteeClientStatus.Connected) 
+				if (this.status === AjusteeClientStatus.Connected)
 				{
 					this.unsubscribe(keyInfo);
 				}
-				else 
+				else
 				{
 					this.setKeyStatus(keyInfo, AjusteeKeyStatus.Unsubscribed);
 					this.subscribedKeys.delete(keyPath);
@@ -350,11 +359,11 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 	{
 		this.setKeyStatus(keyInfo, AjusteeKeyStatus.Subscribing);
 
-		let params = {};	
+		let params = {};
 		if (this.defaultParams) Object.assign(params, this.defaultParams);
 		if (keyInfo.additionalParams) Object.assign(params, keyInfo.additionalParams);
 
-		const data: WsRequestSubscrData = 
+		const data: WsRequestSubscrData =
 		{
 			action: "subscribe",
 			data:
@@ -370,7 +379,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 	{
 		this.setKeyStatus(keyInfo, AjusteeKeyStatus.Unsubscribing);
 
-		const data: WsRequestSubscrData =  
+		const data: WsRequestSubscrData =
 		{
 			action: "unsubscribe",
 			data:
@@ -385,7 +394,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 	{
 		this.webSocket = new WebSocket(`${this.wsUrl}?x-api-key=${this.appId}`);
 		this.webSocket.onopen;
-		
+
 		this.webSocket.onopen = this.handleOpen.bind(this);
 		this.webSocket.onmessage = this.handleMessage.bind(this);
 		this.webSocket.onerror = this.handleError.bind(this);
@@ -395,7 +404,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 		return this.connectCompletedPromise;
 	}
 
-	private async wsConnect() 
+	private async wsConnect()
 	{
 		this.timeout = initialTimeout;
 		if (this.status === AjusteeClientStatus.Connecting) return;
@@ -413,13 +422,13 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 		// while (this.status as AjusteeClientStatus === AjusteeClientStatus.Connecting);
 
 		const isConnected = await this.initConnection();
-		if (!isConnected) 
+		if (!isConnected)
 		{
 			this.subscribedKeys.clear();
 			this.onError();
 			return;
 		}
-		
+
 		for (const keyInfo of this.subscribedKeys.values())
 		{
 			this.subscribe(keyInfo);
@@ -434,12 +443,12 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 			case AjusteeClientStatus.Disconnected:
 				return;
 
-			case AjusteeClientStatus.Connecting:				
-				if (!await this.connectCompletedPromise) 
+			case AjusteeClientStatus.Connecting:
+				if (!await this.connectCompletedPromise)
 				{
 					this.setStatus(AjusteeClientStatus.Disconnected);
 					return;
-				}				
+				}
 			break;
 		}
 		this.webSocket!.onopen = undefined!;
@@ -458,7 +467,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 
 		this.connectCompletedResolve!(true);
 		this.connectCompletedResolve = undefined;
-		this.connectCompletedPromise = undefined;		
+		this.connectCompletedPromise = undefined;
 	}
 
 	private handleClose (event: CloseEvent)
@@ -471,12 +480,12 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 			for (const keyInfo of this.subscribedKeys.values())
 			{
 				const oldKey = keyInfo.oldKey;
-				if (oldKey) 
+				if (oldKey)
 				{
 					keyInfo.oldKey = undefined;
 					this.setKeyStatus(oldKey, AjusteeKeyStatus.Unsubscribed);
 				}
-				else if (keyInfo.status === AjusteeKeyStatus.Unsubscribing) 
+				else if (keyInfo.status === AjusteeKeyStatus.Unsubscribing)
 				{
 					this.setKeyStatus(keyInfo, AjusteeKeyStatus.Unsubscribed);
 					this.subscribedKeys.delete(keyInfo.path);
@@ -484,7 +493,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 			}
 			setTimeout(this.connect.bind(this), 0);
 		}
-		
+
 		this.webSocket!.onopen = undefined!;
 		this.webSocket!.onmessage = undefined!;
 		this.webSocket!.onerror = undefined!;
@@ -519,7 +528,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 			{
 				const subscrData = (response.data as WsResponseData);
 				const subscrKey = this.subscribedKeys.get(subscrData.path);
-				if(!subscrKey) 
+				if(!subscrKey)
 				{
 					console.warn(`Unexpected event ${response.type} for the key path '${subscrData.path}'.`);
 					return;
@@ -531,7 +540,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 						switch(subscrKey.status)
 						{
 							case AjusteeKeyStatus.Subscribing:
-								this.setKeyStatus(subscrKey, AjusteeKeyStatus.Subscribed);						
+								this.setKeyStatus(subscrKey, AjusteeKeyStatus.Subscribed);
 							break;
 
 							case AjusteeKeyStatus.Unsubscribing:
@@ -540,7 +549,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 
 							case AjusteeKeyStatus.Unsubscribed:
 								// the case subscrKey.status == Unsubscribed is the only possible when oldKey is set
-								this.unsubscribe(subscrKey.oldKey!);						
+								this.unsubscribe(subscrKey.oldKey!);
 							break;
 						}
 					break;
@@ -551,14 +560,14 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 
 					default:
 						const oldKeyInfo = subscrKey.oldKey;
-						if (oldKeyInfo) 
+						if (oldKeyInfo)
 						{
 							this.setKeyStatus(oldKeyInfo, AjusteeKeyStatus.Unsubscribed);
 							subscrKey.oldKey = undefined;
 							if (this.allKeysListeners?.onError) this.allKeysListeners.onError(oldKeyInfo, subscrData.statuscode);
 							if (oldKeyInfo.onError) oldKeyInfo.onError(oldKeyInfo, subscrData.statuscode);
 						}
-						else 
+						else
 						{
 							this.setKeyStatus(subscrKey, AjusteeKeyStatus.Unsubscribed);
 							if (this.allKeysListeners?.onError) this.allKeysListeners.onError(subscrKey, subscrData.statuscode);
@@ -574,7 +583,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 			{
 				const unSubscrData = (response.data as WsResponseData);
 				const unsubscrKey = this.subscribedKeys.get(unSubscrData.path);
-				if(!unsubscrKey) 
+				if(!unsubscrKey)
 				{
 					console.warn(`Unexpected event ${response.type} for the key path '${unSubscrData.path}'.`);
 					return;
@@ -584,7 +593,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 				switch(unSubscrData.statuscode)
 				{
 					case AjusteeKeyListenerCode.Success:
-						if (oldKeyInfo) 
+						if (oldKeyInfo)
 						{
 							this.setKeyStatus(oldKeyInfo, AjusteeKeyStatus.Unsubscribed);
 							unsubscrKey.oldKey = undefined;
@@ -603,7 +612,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 									this.subscribe(unsubscrKey);
 								break;
 							}
-						}						
+						}
 					break;
 
 					case AjusteeKeyListenerCode.Exists:
@@ -611,14 +620,14 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 					break;
 
 					default:
-						if (oldKeyInfo) 
+						if (oldKeyInfo)
 						{
 							this.setKeyStatus(oldKeyInfo, AjusteeKeyStatus.Unsubscribed);
 							unsubscrKey.oldKey = undefined;
 							if (this.allKeysListeners?.onError) this.allKeysListeners.onError(oldKeyInfo, unSubscrData.statuscode);
 							if (oldKeyInfo.onError) oldKeyInfo.onError(oldKeyInfo, unSubscrData.statuscode);
 						}
-						else 
+						else
 						{
 							this.setKeyStatus(unsubscrKey, AjusteeKeyStatus.Unsubscribed);
 							if (this.allKeysListeners?.onError) this.allKeysListeners.onError(unsubscrKey, unSubscrData.statuscode);
@@ -631,7 +640,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 			}
 
 			case WsResponseType.Changed:
-			{ 
+			{
 				const changedKeys = (response.data as ConfigurationKey[]);
 
 				for (const changedKey of changedKeys)
@@ -641,7 +650,7 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 					{
 						console.warn(`Unexpected event ${response.type} for the key path '${changedKey.path}'.`);
 						continue;
-					} 
+					}
 					if (keyInfo.oldKey) continue;
 					if(!keyInfo.dataType) keyInfo.dataType = changedKey.dataType;
 					else if(keyInfo.dataType !== changedKey.dataType)
@@ -662,11 +671,11 @@ export class AjusteeClient <T extends AjusteeKeyListener<T> = AjusteeKeyListener
 				break;
 			}
 
-			case WsResponseType.Deleted: 
+			case WsResponseType.Deleted:
 			{
 				const deletedKeyPath = (response.data as string);
 				const deletedKey = this.subscribedKeys.get(deletedKeyPath);
-				if(!deletedKey) 
+				if(!deletedKey)
 				{
 					console.warn(`Unexpected event ${response.type} for the key path '${deletedKeyPath}'.`);
 					return;
