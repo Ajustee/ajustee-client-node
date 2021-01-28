@@ -3,8 +3,8 @@ import WebSocket, { CloseEvent, MessageEvent, OpenEvent } from 'ws';
 import { URL } from "url";
 import { AjusteeHttpClient, HttpMethod, HttpResponse } from "./AjusteeHttpClient";
 
-const defaultUrl = 'https://api.ajustee.com/fo';
-const defaultWsUrl = 'wss://9b3vnticrc.execute-api.us-west-2.amazonaws.com/ws';
+const defaultUrl = 'https://api.ajustee.com';
+const defaultWsUrl = 'wss://ws.ajustee.com';
 
 const appIdHeader = 'x-api-key';
 
